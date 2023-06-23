@@ -23,6 +23,8 @@ void* AllocMBuf(void* device, size_t memsize);
 void* FreeMBuf(void* mBuf);
 void* MatrixDesc(uint_t rows, uint_t cols, uint_t rowBytes);
 void* Matrix(void* buf, void* desc);
+void* VectorDesc(uint_t length);
+void* Vector(void* buf, void* desc);
 void* MBuf2Buf(void* dst,  void* metalbuf, size_t len);
 void* MakeComputeCommandEncoder(void* cmdbuf);
 void CmdBuf_Enqueue(void* cmdBuf);
@@ -38,6 +40,7 @@ Res_t MakeComputePipeline(void* device, void* function);
 
 /* Linalg */
 void* matmul(void* commandBuffer, void* matrixA, void* matrixB, void* matrixC, bool transA, bool transB);
+void* matvecmul(void* commandBuffer, void* matrixA, void* vecB, void* vecC, bool transMat);
 /* NN */
 void* softmax(void* commandBuffer, void* mat, void* out);
 // TMP

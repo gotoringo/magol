@@ -9,7 +9,6 @@ package magol
 */
 import "C"
 import (
-	"context"
 	"unsafe"
 
 	"github.com/pkg/errors"
@@ -21,12 +20,20 @@ var (
 	_ tensor.MatMuler = &Engine{}
 )
 
-const library = `kernel void add(device const float* inA,
+const library = `
+kernel void add(device const float* inA,
                        device const float* inB,
                        device float* result,
                        uint index [[thread_position_in_grid]])
 {
     result[index] = inA[index] + inB[index];
+}
+
+kernel void addScalar(device const float* inVec,
+                      device const float* inScalar,
+                      device float* result,
+                      uint index [[thread_position_in_grid]]) {
+    result[index] = inVec[index] + *inScalar;
 }
 
 kernel void sub(device const float* inA,
@@ -124,16 +131,52 @@ func (e *Engine) Add(a, b tensor.Tensor, opts ...tensor.FuncOpt) (retVal tensor.
 	panic("Unreachable")
 }
 
-func (e *Engine) AddScalar(a tensor.Tensor, b interface{}, leftTensor bool, opts ...tensor.FuncOpt) (tensor.Tensor, error) {
-	panic("NYI")
+func (e *Engine) AddScalar(a tensor.Tensor, b interface{}, leftTensor bool, opts ...tensor.FuncOpt) (retVal tensor.Tensor, err error) {
+	// reuse, safe, _, _, err := e.handleFuncOpts(a.Shape(), a.Dtype(), a.DataOrder(), opts...)
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "AddScalar()")
+	// }
+	// cmdBuf := e.q.CommandBuffer()
+	// pso, err := e.d.MakeComputePipeline(e.fns["addScalar"])
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// elements := a.Shape().TotalSize()
+	// switch {
+	// case safe && reuse == nil:
+	// 	// make reuse
+	// 	reuseMem, err := e.Alloc(int64(elements * 4))
+	// 	if err != nil {
+	// 		return nil, errors.Wrapf(err, "Unable to allocate %d float32s for the result", elements)
+	// 	}
+	// 	reuse = tensor.New(tensor.WithShape(a.Shape().Clone()...), tensor.Of(a.Dtype()), tensor.WithEngine(e), tensor.FromMemory(reuseMem.Uintptr(), reuseMem.MemSize()))
+	// 	fallthrough
+	// case safe && reuse != nil:
+	// 	if leftTensor {
+	// 		C.RunBinFunc(cmdBuf.b, pso.p, memAsMBuf(a).b, memAsMBuf(b).b, memAsMBuf(reuse).b, C.size_t(elements))
+	// 	} else {
+	// 		C.RunBinFunc(cmdBuf.b, pso.p, memAsMBuf(b).b, memAsMBuf(a).b, memAsMBuf(reuse).b, C.size_t(elements))
+	// 	}
+	// 	retVal = reuse
+	// 	return
+	// case !safe:
+	// 	if leftTensor {
+	// 		C.RunBinFunc(cmdBuf.b, pso.p, memAsMBuf(a).b, memAsMBuf(b).b, memAsMBuf(a).b, C.size_t(elements))
+	// 	} else {
+	// 		C.RunBinFunc(cmdBuf.b, pso.p, memAsMBuf(b).b, memAsMBuf(a).b, memAsMBuf(a).b, C.size_t(elements))
+	// 	}
+	// 	retVal = a
+	// 	return
+	// }
+	panic("Unreachable")
 }
 
-func (e *Engine) MatMul(ctx context.Context, a, b, prealloc tensor.Tensor) error {
-	select {
-	case <-ctx.Done():
-		return errors.New("NoOp")
-	default:
-	}
+func (e *Engine) MatMul(a, b, prealloc tensor.Tensor) error {
+	// select {
+	// case <-ctx.Done():
+	// 	return errors.New("NoOp")
+	// default:
+	// }
 	ad, bd, retVal, err := e.checkValidMatmulInput(a, b, prealloc)
 	if err != nil {
 		return err
@@ -151,6 +194,29 @@ func (e *Engine) MatMul(ctx context.Context, a, b, prealloc tensor.Tensor) error
 
 	cmdBuf := e.q.CommandBuffer()
 	return MPSMatMul(cmdBuf, A, B, C)
+}
+
+func (e *Engine) MatVecMul(a, b, prealloc tensor.Tensor) error {
+	// select {
+	// case <-ctx.Done():
+	// 	return errors.New("NoOp")
+	// default:
+	// }
+	ad, bd, retVal, err := e.checkValidMatVecMulInput(a, b, prealloc)
+	if err != nil {
+		return nil
+	}
+	aDesc := pls(desc2MDesc(ad))
+	bDesc := pls(desc2VDesc(bd))
+	cDesc := pls(desc2VDesc(retVal))
+
+	aBuf := memAsMBuf(ad)
+	bBuf := memAsMBuf(bd)
+	cBuf := memAsMBuf(retVal)
+
+	A, v, c := NewMatrix(aBuf, aDesc), NewVector(bBuf, bDesc), NewVector(cBuf, cDesc)
+	cmdBuf := e.q.CommandBuffer()
+	return MPSMatVecMul(cmdBuf, A, v, c)
 }
 
 func (e *Engine) checkValidDtype(ts ...tensor.Tensor) error {
@@ -230,7 +296,32 @@ func (e *Engine) checkValidMatmulInput(a, b, ret tensor.Tensor) (ad, bd, retVal 
 	}
 
 	return ad, bd, retVal, nil
+}
 
+func (e *Engine) checkValidMatVecMulInput(a, b, ret tensor.Tensor) (ad, bd, retVal tensor.DenseTensor, err error) {
+	if a.Dtype() != tensor.Float32 || a.Dtype() != b.Dtype() || b.Dtype() != ret.Dtype() {
+		return nil, nil, nil, errors.New("Expected a and b and retVal all to have the same Dtype")
+	}
+	ad, ok := a.(tensor.DenseTensor)
+	if !ok {
+		return nil, nil, nil, errors.New("Expected a to be a DenseTensor")
+	}
+	bd, ok = b.(tensor.DenseTensor)
+	if !ok {
+		return nil, nil, nil, errors.New("Expected b to be a DenseTensor")
+	}
+	retVal, ok = ret.(tensor.DenseTensor)
+	if !ok {
+		return nil, nil, nil, errors.New("Expected retVal to be a DenseTensor")
+	}
+	if ad.Shape().Dims() != 2 || bd.Shape().IsVectorLike() || retVal.Shape().IsVectorLike() {
+		return nil, nil, nil, errors.New("Expected a to be 2D and b and retVal to be  vectorlike")
+	}
+	if ad.Shape()[1] != bd.Shape()[0] {
+		return nil, nil, nil, errors.New("Expected the inner dimensions of a and b to match")
+	}
+
+	return ad, bd, retVal, nil
 }
 
 func (e *Engine) handleFuncOpts(expectedShape tensor.Shape, expectedType tensor.Dtype, do tensor.DataOrder, opts ...tensor.FuncOpt) (reuse tensor.DenseTensor, safe, toReuse, incr bool, err error) {

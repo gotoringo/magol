@@ -66,6 +66,28 @@ type VectorDescriptor struct {
 
 func (d VectorDescriptor) isDesc() {}
 
+func desc2VDesc(t tensor.DenseTensor) (VectorDescriptor, error) {
+	desc := t.Info()
+	if !desc.IsVectorLike() {
+		return VectorDescriptor{}, errors.New("Expected a vectorlike matrix")
+	}
+	length := getVecLen(desc.Shape())
+	vdesc := C.VectorDesc(C.uint_t(length))
+	if vdesc == nil {
+		return VectorDescriptor{}, errors.New("Failed to create Vector Descriptor")
+	}
+	return VectorDescriptor{vdesc}, nil
+}
+
+func getVecLen(s tensor.Shape) int {
+	for _, d := range s {
+		if d != 1 {
+			return d
+		}
+	}
+	return 1
+}
+
 // Vector represents a vector.
 // See: https://developer.apple.com/documentation/metalperformanceshaders/mpsvector?language=objc
 type Vector struct {
@@ -73,9 +95,16 @@ type Vector struct {
 	b Buffer
 }
 
+func NewVector(buf Buffer, desc VectorDescriptor) *Vector {
+	return &Vector{v: C.Vector(buf.b, desc.d), b: buf}
+}
+
 func MPSMatMul(cmdBuf CommandBuffer, A, B, CM *Matrix) error {
 	C.matmul(cmdBuf.b, A.m, B.m, CM.m, C.bool(A.trans), C.bool(B.trans))
 	return nil
 }
 
-func MPSMatVecMul(cmdBuf CommandBuffer, M *Matrix, v *Vector, retVal *Vector) error { panic("NYI") }
+func MPSMatVecMul(cmdBuf CommandBuffer, M *Matrix, v *Vector, retVal *Vector) error {
+	C.matvecmul(cmdBuf.b, M.m, v.v, retVal.v, C.bool(M.trans))
+	return nil
+}

@@ -66,6 +66,18 @@ void* Matrix(void* buf, void* desc){
 				      descriptor:(MPSMatrixDescriptor*)desc];
 }
 
+// https://developer.apple.com/documentation/metalperformanceshaders/mpsvectordescriptor?language=objc
+void* VectorDesc(uint_t length){
+	return [MPSVectorDescriptor vectorDescriptorWithLength:(NSUInteger)length
+						      dataType:MPSDataTypeFloat32];
+}
+
+// https://developer.apple.com/documentation/metalperformanceshaders/mpsvector/2873346-initwithbuffer?language=objc
+void* Vector(void* buf, void* desc) {
+	return [[MPSVector alloc] initWithBuffer:(id<MTLBuffer>)buf
+				      descriptor:(MPSVectorDescriptor*)desc];
+}
+
 void* MBuf2Buf(void* dst,  void* metalbuf, size_t len) {
 	id<MTLBuffer> mbuf  = (id<MTLBuffer>)metalbuf;
 	memcpy(dst, [mbuf contents], len);
@@ -164,6 +176,28 @@ void* matmul(void* commandBuffer, void* matrixA, void* matrixB, void* matrixC, b
 
     [cmdBuf commit]; // TODO THIS IS A BAD IDEA. MOVE CONTROL STRUCTURES OUT
     [cmdBuf waitUntilCompleted];
+}
+
+void* matvecmul(void* commandBuffer, void* matrixA, void* vecB, void* vecC, bool transMat) {
+	id<MTLCommandBuffer> cmdBuf = (id<MTLCommandBuffer>) commandBuffer;
+	MPSMatrix *A = (MPSMatrix*)matrixA;
+	MPSVector *B = (MPSVector*)vecB;
+	MPSVector *C = (MPSVector*)vecC;
+
+	// create a MPSMatrixVectorMultiplication kernel
+	MPSMatrixVectorMultiplication* matvecMul = [[MPSMatrixVectorMultiplication alloc] initWithDevice:cmdBuf.device
+											       transpose:transMat
+												    rows:A.rows
+												 columns:A.columns
+												   alpha:1.0
+												    beta:0.0];
+	[matvecMul encodeToCommandBuffer:cmdBuf
+			     inputMatrix:A
+			     inputVector:B
+			    resultVector:C];
+	[cmdBuf commit];
+	[cmdBuf waitUntilCompleted];
+
 }
 
 /* NN */
